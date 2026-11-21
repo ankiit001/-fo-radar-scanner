@@ -2,6 +2,7 @@
 import os
 import csv
 import io
+import logging
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,10 +11,22 @@ from app.scanner import score_rows
 from app.groww_client import GrowwClient
 
 
+# -------------------------
+# LOGGING
+# -------------------------
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+# -------------------------
+# FASTAPI APP
+# -------------------------
+
 app = FastAPI(
     title="F&O Radar Scanner API",
     description="Groww NSE F&O Intraday and Swing Scanner",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 
@@ -69,6 +82,7 @@ def config():
         "timeframe": "5m",
         "universe": "NSE_FNO",
         "direction": "BOTH",
+        "risk": "LOW",
         "indicators": [
             "EMA 34",
             "EMA 50",
@@ -80,7 +94,7 @@ def config():
         ],
         "execution": "MANUAL_ONLY",
         "live_api_ready": bool(
-            os.getenv("GROWW_ACCESS_TOKEN")
+            os.getenv("GROWW_ACCESS_TOKEN", "").strip()
         )
     }
 
@@ -91,9 +105,20 @@ def config():
 
 @app.get("/groww/status")
 def groww_status():
-    client = get_groww_client()
+    try:
+        client = get_groww_client()
+        return client.status()
 
-    return client.status()
+    except Exception as exc:
+        logger.exception("Groww status request failed")
+
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error_type": type(exc).__name__,
+                "message": "Groww status request failed"
+            }
+        )
 
 
 # -------------------------
@@ -105,6 +130,9 @@ def groww_quote(
     symbol: str = Query(..., min_length=1),
     segment: str = Query("CASH")
 ):
+    segment = segment.upper()
+    symbol = symbol.strip().upper()
+
     if segment not in ("CASH", "FNO"):
         raise HTTPException(
             status_code=400,
@@ -114,15 +142,25 @@ def groww_quote(
     try:
         client = get_groww_client()
 
-        return client.get_quote(
+        result = client.get_quote(
             trading_symbol=symbol,
             segment=segment
         )
 
+        return result
+
     except Exception as exc:
+        logger.exception("Groww quote request failed")
+
         raise HTTPException(
             status_code=502,
-            detail=f"Groww quote request failed: {type(exc).__name__}"
+            detail={
+                "error_type": type(exc).__name__,
+                "message": str(
+                    getattr(exc, "msg", str(exc))
+                ),
+                "error_code": getattr(exc, "code", None)
+            }
         )
 
 
@@ -136,6 +174,9 @@ def groww_candles(
     segment: str = Query("CASH"),
     days: int = Query(5, ge=1, le=15)
 ):
+    segment = segment.upper()
+    symbol = symbol.strip().upper()
+
     if segment not in ("CASH", "FNO"):
         raise HTTPException(
             status_code=400,
@@ -158,9 +199,17 @@ def groww_candles(
         )
 
     except Exception as exc:
+        logger.exception("Groww candles request failed")
+
         raise HTTPException(
             status_code=502,
-            detail=f"Groww candles request failed: {type(exc).__name__}"
+            detail={
+                "error_type": type(exc).__name__,
+                "message": str(
+                    getattr(exc, "msg", str(exc))
+                ),
+                "error_code": getattr(exc, "code", None)
+            }
         )
 
 
@@ -218,7 +267,7 @@ def demo_scan():
 @app.post("/scan/csv")
 async def scan_csv(file: UploadFile = File(...)):
 
-    if not file.filename.lower().endswith(".csv"):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file"
@@ -248,12 +297,30 @@ async def scan_csv(file: UploadFile = File(...)):
             "adx"
         ]
 
+        required_fields = [
+            "symbol",
+            *numeric_fields
+        ]
+
+        for field in required_fields:
+            if field not in rows[0]:
+                raise ValueError(
+                    f"Missing CSV column: {field}"
+                )
+
         for row in rows:
             for field in numeric_fields:
                 row[field] = float(row[field])
 
             if not row.get("direction"):
                 row["direction"] = "BUY"
+
+            row["direction"] = row["direction"].upper()
+
+            if row["direction"] not in ("BUY", "SELL"):
+                raise ValueError(
+                    "Direction must be BUY or SELL"
+                )
 
         results = score_rows(rows)
 
@@ -264,8 +331,13 @@ async def scan_csv(file: UploadFile = File(...)):
             "results": results
         }
 
+    except HTTPException:
+        raise
+
     except Exception as exc:
+        logger.exception("CSV processing failed")
+
         raise HTTPException(
             status_code=400,
-            detail=f"CSV processing failed: {type(exc).__name__}"
+            detail=f"CSV processing failed: {type(exc).__name__}: {str(exc)}"
         )
