@@ -3,9 +3,11 @@ import os
 import csv
 import io
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.scanner import score_rows
 from app.groww_client import GrowwClient
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="F&O Radar Scanner API",
     description="Groww NSE F&O Intraday and Swing Scanner",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 
@@ -44,19 +46,27 @@ def get_groww_client():
 
 
 # -------------------------
-# HOME
+# HOME - DASHBOARD
 # -------------------------
 
 @app.get("/")
 def root():
-    return {
-        "app": "F&O Radar Scanner",
-        "status": "running",
-        "broker": "Groww",
-        "timeframe": "5m",
-        "universe": "NSE_FNO",
-        "execution": "MANUAL_ONLY"
-    }
+    dashboard_file = (
+        Path(__file__).resolve().parent.parent
+        / "static"
+        / "index.html"
+    )
+
+    if not dashboard_file.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Dashboard index.html not found"
+        )
+
+    return FileResponse(
+        dashboard_file,
+        media_type="text/html"
+    )
 
 
 # -------------------------
@@ -142,12 +152,10 @@ def groww_quote(
     try:
         client = get_groww_client()
 
-        result = client.get_quote(
+        return client.get_quote(
             trading_symbol=symbol,
             segment=segment
         )
-
-        return result
 
     except Exception as exc:
         logger.exception("Groww quote request failed")
@@ -256,6 +264,7 @@ def demo_scan():
     return {
         "mode": "DEMO_NOT_LIVE",
         "timeframe": "5m",
+        "total_stocks": len(rows),
         "results": score_rows(rows)
     }
 
@@ -267,7 +276,10 @@ def demo_scan():
 @app.post("/scan/csv")
 async def scan_csv(file: UploadFile = File(...)):
 
-    if not file.filename or not file.filename.lower().endswith(".csv"):
+    if (
+        not file.filename
+        or not file.filename.lower().endswith(".csv")
+    ):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file"
@@ -339,5 +351,8 @@ async def scan_csv(file: UploadFile = File(...)):
 
         raise HTTPException(
             status_code=400,
-            detail=f"CSV processing failed: {type(exc).__name__}: {str(exc)}"
+            detail=(
+                f"CSV processing failed: "
+                f"{type(exc).__name__}: {str(exc)}"
+            )
         )
