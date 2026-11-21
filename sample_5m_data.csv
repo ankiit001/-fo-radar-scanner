@@ -1,0 +1,3 @@
+symbol,close,ema34,ema50,ema200,vwap,prev_high,prev_low,volume,avg_volume20,rsi,adx,direction
+SAMPLE_BUY,250,248,246,240,247,249,244,180000,100000,62,27,BUY
+SAMPLE_SELL,510,512,514,520,513,516,511,210000,100000,38,29,SELL
