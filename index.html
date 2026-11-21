@@ -1,1 +1,214 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F&O Radar Scanner</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1220;color:#e8eef8;font-family:Arial,sans-serif;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center}
+h2{margin:8px 0;color:#60a5fa}
+small{color:#9caec5}
+.badge{background:#713f12;color:#facc15;padding:7px;border-radius:8px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}
+.card{background:#172338;padding:16px;border-radius:12px}
+.card b{font-size:26px;display:block;margin-top:8px}
+.green{color:#22c55e}.red{color:#ef4444}
+button{background:#2563eb;color:white;border:0;padding:12px;border-radius:8px;font-weight:bold}
+button:disabled{opacity:.5}
+.tabs{display:flex;gap:8px;margin:16px 0}
+.tabs button{flex:1;background:#26364d}
+.tabs button.active{background:#2563eb}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:12px 7px;border-bottom:1px solid #29384d}
+.panel{background:#172338;border-radius:12px;padding:14px;margin-top:16px;overflow:auto}
+.signal{font-weight:bold}
+input{max-width:100%;margin:12px 0}
+footer{color:#93a4ba;font-size:12px;margin:20px 0}
+</style>
+</head>
+<body>
+
+<header>
+ <div>
+  <h2>F&O RADAR</h2>
+  <small>Intraday & Swing Scanner</small>
+ </div>
+ <span class="badge" id="mode">DEMO</span>
+</header>
+
+<div class="cards">
+ <div class="card">
+  <small>BUY SIGNALS</small>
+  <b class="green" id="buys">0</b>
+ </div>
+ <div class="card">
+  <small>SELL SIGNALS</small>
+  <b class="red" id="sells">0</b>
+ </div>
+ <div class="card">
+  <small>TOTAL STOCKS</small>
+  <b id="total">0</b>
+ </div>
+ <div class="card">
+  <small>TIMEFRAME</small>
+  <b>5 MIN</b>
+ </div>
+</div>
+
+<button onclick="loadScanner()" id="refresh">↻ Refresh Scanner</button>
+
+<div class="tabs">
+ <button class="active" onclick="filterData('ALL',this)">ALL</button>
+ <button onclick="filterData('BUY',this)">BUY</button>
+ <button onclick="filterData('SELL',this)">SELL</button>
+</div>
+
+<div class="panel">
+ <h3>Scanner Watchlist</h3>
+ <table>
+  <thead>
+   <tr>
+    <th>Stock</th>
+    <th>Signal</th>
+    <th>Score</th>
+    <th>Price</th>
+   </tr>
+  </thead>
+  <tbody id="stocks">
+   <tr><td colspan="4">Loading...</td></tr>
+  </tbody>
+ </table>
+</div>
+
+<div class="panel">
+ <h3>CSV Scanner</h3>
+ <small>Upload candle-indicator data in the required CSV format.</small>
+ <br>
+ <input type="file" id="csvfile" accept=".csv">
+ <br>
+ <button onclick="uploadCSV()">Upload & Scan CSV</button>
+ <p id="message"></p>
+</div>
+
+<footer>
+ F&O RADAR | Manual Trading Only | Demo/CSV Data
+ <br>Not a live trading signal. Verify data before trading.
+</footer>
+
+<script>
+const API = window.location.origin;
+let allResults = [];
+let currentFilter = "ALL";
+
+async function loadScanner(){
+ const btn=document.getElementById("refresh");
+ btn.disabled=true;
+ document.getElementById("stocks").innerHTML=
+ '<tr><td colspan="4">Loading scanner...</td></tr>';
+
+ try{
+  const response=await fetch(API+"/scan/demo");
+  if(!response.ok) throw new Error("API Error "+response.status);
+
+  const data=await response.json();
+  allResults=data.results||[];
+
+  document.getElementById("mode").textContent=
+   data.mode||"DEMO";
+
+  document.getElementById("total").textContent=
+   allResults.length;
+
+  document.getElementById("buys").textContent=
+   allResults.filter(x=>x.direction==="BUY").length;
+
+  document.getElementById("sells").textContent=
+   allResults.filter(x=>x.direction==="SELL").length;
+
+  renderResults();
+ }catch(error){
+  document.getElementById("stocks").innerHTML=
+   '<tr><td colspan="4">API Error: '+error.message+'</td></tr>';
+ }finally{
+  btn.disabled=false;
+ }
+}
+
+function renderResults(){
+ const filtered=currentFilter==="ALL"
+ ?allResults
+ :allResults.filter(x=>x.direction===currentFilter);
+
+ document.getElementById("stocks").innerHTML=
+ filtered.map(x=>`
+ <tr>
+  <td><b>${x.symbol}</b></td>
+  <td class="signal ${x.direction==="BUY"?"green":"red"}">
+   ${x.direction}
+  </td>
+  <td>${x.score??"-"}</td>
+  <td>₹${x.close??"-"}</td>
+ </tr>
+ `).join("")||'<tr><td colspan="4">No results</td></tr>';
+}
+
+function filterData(type,button){
+ currentFilter=type;
+ document.querySelectorAll(".tabs button")
+ .forEach(b=>b.classList.remove("active"));
+ button.classList.add("active");
+ renderResults();
+}
+
+async function uploadCSV(){
+ const file=document.getElementById("csvfile").files[0];
+ const msg=document.getElementById("message");
+
+ if(!file){
+  msg.textContent="Please select a CSV file.";
+  return;
+ }
+
+ const form=new FormData();
+ form.append("file",file);
+
+ msg.textContent="Uploading...";
+
+ try{
+  const response=await fetch(API+"/scan/csv",{
+   method:"POST",
+   body:form
+  });
+
+  const data=await response.json();
+  if(!response.ok) throw new Error(
+   data.detail?.toString()||"Upload failed"
+  );
+
+  allResults=data.results||[];
+  document.getElementById("total").textContent=allResults.length;
+  document.getElementById("buys").textContent=
+   allResults.filter(x=>x.direction==="BUY").length;
+  document.getElementById("sells").textContent=
+   allResults.filter(x=>x.direction==="SELL").length;
+  document.getElementById("mode").textContent=data.mode||"CSV";
+  currentFilter="ALL";
+  document.querySelectorAll(".tabs button")
+   .forEach(b=>b.classList.remove("active"));
+  document.querySelector(".tabs button").classList.add("active");
+  renderResults();
+
+  msg.textContent="CSV scan successful!";
+ }catch(error){
+  msg.textContent="Error: "+error.message;
+ }
+}
+
+loadScanner();
+</script>
+</body>
+</html>
+
