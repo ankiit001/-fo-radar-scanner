@@ -5,7 +5,13 @@ import io
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    HTTPException,
+    Query
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -22,13 +28,21 @@ logger = logging.getLogger(__name__)
 
 
 # -------------------------
+# PATHS
+# -------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DASHBOARD_FILE = BASE_DIR / "static" / "index.html"
+
+
+# -------------------------
 # FASTAPI APP
 # -------------------------
 
 app = FastAPI(
     title="F&O Radar Scanner API",
-    description="Groww NSE F&O Intraday and Swing Scanner",
-    version="1.2.0"
+    description="NSE F&O Intraday and Swing Scanner",
+    version="1.3.0"
 )
 
 
@@ -46,27 +60,30 @@ def get_groww_client():
 
 
 # -------------------------
-# HOME - DASHBOARD
+# DASHBOARD
 # -------------------------
 
-@app.get("/")
-def root():
-    dashboard_file = (
-        Path(__file__).resolve().parent.parent
-        / "static"
-        / "index.html"
-    )
-
-    if not dashboard_file.is_file():
+def serve_dashboard():
+    if not DASHBOARD_FILE.is_file():
         raise HTTPException(
             status_code=404,
             detail="Dashboard index.html not found"
         )
 
     return FileResponse(
-        dashboard_file,
+        DASHBOARD_FILE,
         media_type="text/html"
     )
+
+
+@app.get("/")
+def root():
+    return serve_dashboard()
+
+
+@app.get("/dashboard")
+def dashboard():
+    return serve_dashboard()
 
 
 # -------------------------
@@ -77,7 +94,8 @@ def root():
 def health():
     return {
         "status": "ok",
-        "api": "online"
+        "api": "online",
+        "dashboard": DASHBOARD_FILE.is_file()
     }
 
 
@@ -103,6 +121,7 @@ def config():
             "VOLUME"
         ],
         "execution": "MANUAL_ONLY",
+        "data_mode": "DEMO_CSV_UNTIL_LIVE_API_ACCESS",
         "live_api_ready": bool(
             os.getenv("GROWW_ACCESS_TOKEN", "").strip()
         )
@@ -110,7 +129,7 @@ def config():
 
 
 # -------------------------
-# GROWW API STATUS
+# GROWW STATUS
 # -------------------------
 
 @app.get("/groww/status")
@@ -140,8 +159,8 @@ def groww_quote(
     symbol: str = Query(..., min_length=1),
     segment: str = Query("CASH")
 ):
-    segment = segment.upper()
     symbol = symbol.strip().upper()
+    segment = segment.strip().upper()
 
     if segment not in ("CASH", "FNO"):
         raise HTTPException(
@@ -173,7 +192,7 @@ def groww_quote(
 
 
 # -------------------------
-# HISTORICAL 5 MIN CANDLES
+# GROWW HISTORICAL CANDLES
 # -------------------------
 
 @app.get("/groww/candles")
@@ -182,8 +201,8 @@ def groww_candles(
     segment: str = Query("CASH"),
     days: int = Query(5, ge=1, le=15)
 ):
-    segment = segment.upper()
     symbol = symbol.strip().upper()
+    segment = segment.strip().upper()
 
     if segment not in ("CASH", "FNO"):
         raise HTTPException(
