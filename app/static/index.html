@@ -1,1 +1,99 @@
 
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F&O Radar Scanner</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101827;color:#f1f5f9;font-family:Arial,sans-serif}
+header{padding:20px;background:#172438}
+h2{margin:0 0 8px}
+small{color:#aab8ca}
+main{padding:16px;max-width:700px;margin:auto}
+.panel{background:#1d2b40;padding:16px;border-radius:12px;margin:14px 0}
+button{padding:12px 16px;border:0;border-radius:8px;background:#2563eb;color:white;font-weight:bold;margin:4px}
+input{max-width:100%;margin:10px 0}
+.tabs{display:flex;gap:8px}
+.tabs button{flex:1}
+.stock{padding:13px;margin:10px 0;background:#26364d;border-radius:9px}
+.buy{color:#4ade80}.sell{color:#fb7185}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+<h2>F&O RADAR SCANNER</h2>
+<small>NSE F&O | Manual Trading Only</small>
+</header>
+<main>
+<div class="panel">
+<h3>Scanner Status</h3>
+<p id="status">Backend जाँच रहे हैं...</p>
+<p><small>CSV / Demo Mode — Live Market Data नहीं</small></p>
+</div>
+
+<div class="panel">
+<h3>CSV Scanner</h3>
+<input type="file" id="csvfile" accept=".csv">
+<br>
+<button onclick="uploadCSV()">Upload & Scan</button>
+</div>
+
+<div class="panel">
+<h3>Trading Signals</h3>
+<div class="tabs">
+<button onclick="show('BUY')">BUY</button>
+<button onclick="show('SELL')">SELL</button>
+</div>
+<div id="results">पहले CSV अपलोड करें।</div>
+</div>
+</main>
+
+<script>
+let allResults=[];
+async function checkBackend(){
+ try{
+  const r=await fetch('/health');
+  document.getElementById('status').textContent=
+   r.ok?'Backend Online':'Backend Error';
+ }catch(e){
+  document.getElementById('status').textContent='Backend उपलब्ध नहीं';
+ }
+}
+async function uploadCSV(){
+ const file=document.getElementById('csvfile').files[0];
+ if(!file){alert('पहले CSV फाइल चुनें');return;}
+ const data=new FormData();
+ data.append('file',file);
+ document.getElementById('results').textContent='Scanning...';
+ try{
+  const r=await fetch('/scan/csv',{method:'POST',body:data});
+  const result=await r.json();
+  if(!r.ok)throw new Error(JSON.stringify(result));
+  allResults=result.results||[];
+  show('BUY');
+ }catch(e){
+  document.getElementById('results').textContent='Error: '+e.message;
+ }
+}
+function show(direction){
+ const rows=allResults.filter(x=>x.direction===direction);
+ const el=document.getElementById('results');
+ if(!rows.length){el.textContent='कोई '+direction+' signal नहीं मिला।';return;}
+ el.innerHTML=rows.map(x=>`
+ <div class="stock">
+ <b class="${direction.toLowerCase()}">${x.symbol} — ${x.direction}</b>
+ <p>Score: ${x.score} | Status: ${x.status}</p>
+ <p>Close: ₹${x.close} | RSI: ${x.rsi} | ADX: ${x.adx}</p>
+ <p>Volume Ratio: ${x.volume_ratio}</p>
+ <small>${(x.reasons||[]).join(' • ')}</small>
+ <p><small>Entry / SL / Target अभी उपलब्ध नहीं हैं।</small></p>
+ </div>`).join('');
+}
+checkBackend();
+</script>
+</body>
+</html>
+
