@@ -5,12 +5,7 @@ import io
 import logging
 from pathlib import Path
 
-from fastapi import (
-    FastAPI,
-    UploadFile,
-    File,
-    HTTPException
-)
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -20,13 +15,14 @@ from app.sahi_client import SahiClient
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DASHBOARD_FILE = BASE_DIR / "static" / "index.html"
+# Correct project paths
+APP_DIR = Path(__file__).resolve().parent
+DASHBOARD_FILE = APP_DIR / "static" / "index.html"
 
 app = FastAPI(
     title="ANKIT SMART SCANNER",
     description="NSE F&O Intraday Scanner using Sahi",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 app.add_middleware(
@@ -44,11 +40,16 @@ def get_sahi_client():
 
 def serve_dashboard():
     if not DASHBOARD_FILE.is_file():
+        logger.error("Dashboard missing: %s", DASHBOARD_FILE)
         raise HTTPException(
             status_code=404,
-            detail="Dashboard not found"
+            detail="Dashboard not found: app/static/index.html"
         )
-    return FileResponse(DASHBOARD_FILE)
+
+    return FileResponse(
+        path=str(DASHBOARD_FILE),
+        media_type="text/html"
+    )
 
 
 @app.get("/")
@@ -66,7 +67,9 @@ def health():
     return {
         "status": "ok",
         "api": "online",
-        "dashboard": DASHBOARD_FILE.is_file()
+        "app": "ANKIT SMART SCANNER",
+        "dashboard": DASHBOARD_FILE.is_file(),
+        "dashboard_path": str(DASHBOARD_FILE)
     }
 
 
@@ -90,7 +93,8 @@ def config():
         "execution": "MANUAL_ONLY",
         "data_mode": "DEMO_UNTIL_SAHI_API_VERIFIED",
         "live_api_ready": bool(
-            os.getenv("SAHI_API_KEY", "").strip()
+            os.getenv("SAHI_KEY_ID", "").strip()
+            and os.getenv("SAHI_SECRET", "").strip()
         )
     }
 
@@ -99,19 +103,18 @@ def config():
 def sahi_status():
     try:
         return get_sahi_client().status()
-    except Exception as exc:
+
+    except Exception:
         logger.exception("Sahi status failed")
         raise HTTPException(
             status_code=502,
-            detail={
-                "error_type": type(exc).__name__,
-                "message": "Sahi status failed"
-            }
+            detail="Sahi API status check failed"
         )
 
 
 @app.get("/scan/demo")
 def demo_scan():
+
     rows = [
         {
             "symbol": "DEMO_ALPHA",
@@ -156,6 +159,7 @@ def demo_scan():
 
 @app.post("/scan/csv")
 async def scan_csv(file: UploadFile = File(...)):
+
     if (
         not file.filename
         or not file.filename.lower().endswith(".csv")
@@ -167,18 +171,32 @@ async def scan_csv(file: UploadFile = File(...)):
 
     try:
         raw = (await file.read()).decode("utf-8-sig")
-        rows = list(csv.DictReader(io.StringIO(raw)))
+
+        rows = list(
+            csv.DictReader(io.StringIO(raw))
+        )
 
         if not rows:
             raise ValueError("CSV contains no data")
 
         numeric_fields = [
-            "close", "ema34", "ema50", "ema200",
-            "vwap", "prev_high", "prev_low",
-            "volume", "avg_volume20", "rsi", "adx"
+            "close",
+            "ema34",
+            "ema50",
+            "ema200",
+            "vwap",
+            "prev_high",
+            "prev_low",
+            "volume",
+            "avg_volume20",
+            "rsi",
+            "adx"
         ]
 
-        required_fields = ["symbol", *numeric_fields]
+        required_fields = [
+            "symbol",
+            *numeric_fields
+        ]
 
         for field in required_fields:
             if field not in rows[0]:
@@ -187,6 +205,7 @@ async def scan_csv(file: UploadFile = File(...)):
                 )
 
         for row in rows:
+
             for field in numeric_fields:
                 row[field] = float(row[field])
 
@@ -211,8 +230,10 @@ async def scan_csv(file: UploadFile = File(...)):
 
     except HTTPException:
         raise
+
     except Exception as exc:
         logger.exception("CSV processing failed")
+
         raise HTTPException(
             status_code=400,
             detail=f"CSV processing failed: {str(exc)}"
