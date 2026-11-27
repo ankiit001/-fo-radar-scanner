@@ -9,42 +9,25 @@ from fastapi import (
     FastAPI,
     UploadFile,
     File,
-    HTTPException,
-    Query
+    HTTPException
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.scanner import score_rows
-from app.groww_client import GrowwClient
-
-
-# -------------------------
-# LOGGING
-# -------------------------
+from app.sahi_client import SahiClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# -------------------------
-# PATHS
-# -------------------------
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 DASHBOARD_FILE = BASE_DIR / "static" / "index.html"
 
-
-# -------------------------
-# FASTAPI APP
-# -------------------------
-
 app = FastAPI(
-    title="F&O Radar Scanner API",
-    description="NSE F&O Intraday and Swing Scanner",
-    version="1.3.0"
+    title="ANKIT SMART SCANNER",
+    description="NSE F&O Intraday Scanner using Sahi",
+    version="2.0.0"
 )
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,25 +38,17 @@ app.add_middleware(
 )
 
 
-def get_groww_client():
-    return GrowwClient()
+def get_sahi_client():
+    return SahiClient()
 
-
-# -------------------------
-# DASHBOARD
-# -------------------------
 
 def serve_dashboard():
     if not DASHBOARD_FILE.is_file():
         raise HTTPException(
             status_code=404,
-            detail="Dashboard index.html not found"
+            detail="Dashboard not found"
         )
-
-    return FileResponse(
-        DASHBOARD_FILE,
-        media_type="text/html"
-    )
+    return FileResponse(DASHBOARD_FILE)
 
 
 @app.get("/")
@@ -86,10 +61,6 @@ def dashboard():
     return serve_dashboard()
 
 
-# -------------------------
-# HEALTH
-# -------------------------
-
 @app.get("/health")
 def health():
     return {
@@ -99,18 +70,14 @@ def health():
     }
 
 
-# -------------------------
-# CONFIG
-# -------------------------
-
 @app.get("/config")
 def config():
     return {
-        "broker": "Groww",
+        "app": "ANKIT SMART SCANNER",
+        "broker": "Sahi",
         "timeframe": "5m",
         "universe": "NSE_FNO",
         "direction": "BOTH",
-        "risk": "LOW",
         "indicators": [
             "EMA 34",
             "EMA 50",
@@ -121,132 +88,30 @@ def config():
             "VOLUME"
         ],
         "execution": "MANUAL_ONLY",
-        "data_mode": "DEMO_CSV_UNTIL_LIVE_API_ACCESS",
+        "data_mode": "DEMO_UNTIL_SAHI_API_VERIFIED",
         "live_api_ready": bool(
-            os.getenv("GROWW_ACCESS_TOKEN", "").strip()
+            os.getenv("SAHI_API_KEY", "").strip()
         )
     }
 
 
-# -------------------------
-# GROWW STATUS
-# -------------------------
-
-@app.get("/groww/status")
-def groww_status():
+@app.get("/sahi/status")
+def sahi_status():
     try:
-        client = get_groww_client()
-        return client.status()
-
+        return get_sahi_client().status()
     except Exception as exc:
-        logger.exception("Groww status request failed")
-
+        logger.exception("Sahi status failed")
         raise HTTPException(
             status_code=502,
             detail={
                 "error_type": type(exc).__name__,
-                "message": "Groww status request failed"
+                "message": "Sahi status failed"
             }
         )
 
-
-# -------------------------
-# GROWW QUOTE
-# -------------------------
-
-@app.get("/groww/quote")
-def groww_quote(
-    symbol: str = Query(..., min_length=1),
-    segment: str = Query("CASH")
-):
-    symbol = symbol.strip().upper()
-    segment = segment.strip().upper()
-
-    if segment not in ("CASH", "FNO"):
-        raise HTTPException(
-            status_code=400,
-            detail="Segment must be CASH or FNO"
-        )
-
-    try:
-        client = get_groww_client()
-
-        return client.get_quote(
-            trading_symbol=symbol,
-            segment=segment
-        )
-
-    except Exception as exc:
-        logger.exception("Groww quote request failed")
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error_type": type(exc).__name__,
-                "message": str(
-                    getattr(exc, "msg", str(exc))
-                ),
-                "error_code": getattr(exc, "code", None)
-            }
-        )
-
-
-# -------------------------
-# GROWW HISTORICAL CANDLES
-# -------------------------
-
-@app.get("/groww/candles")
-def groww_candles(
-    symbol: str = Query(..., min_length=1),
-    segment: str = Query("CASH"),
-    days: int = Query(5, ge=1, le=15)
-):
-    symbol = symbol.strip().upper()
-    segment = segment.strip().upper()
-
-    if segment not in ("CASH", "FNO"):
-        raise HTTPException(
-            status_code=400,
-            detail="Segment must be CASH or FNO"
-        )
-
-    if not symbol.startswith("NSE-"):
-        raise HTTPException(
-            status_code=400,
-            detail="Use NSE symbol format, e.g. NSE-RELIANCE"
-        )
-
-    try:
-        client = get_groww_client()
-
-        return client.get_historical_candles(
-            groww_symbol=symbol,
-            segment=segment,
-            days=days
-        )
-
-    except Exception as exc:
-        logger.exception("Groww candles request failed")
-
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error_type": type(exc).__name__,
-                "message": str(
-                    getattr(exc, "msg", str(exc))
-                ),
-                "error_code": getattr(exc, "code", None)
-            }
-        )
-
-
-# -------------------------
-# DEMO SCANNER
-# -------------------------
 
 @app.get("/scan/demo")
 def demo_scan():
-
     rows = [
         {
             "symbol": "DEMO_ALPHA",
@@ -282,19 +147,15 @@ def demo_scan():
 
     return {
         "mode": "DEMO_NOT_LIVE",
+        "broker": "Sahi",
         "timeframe": "5m",
         "total_stocks": len(rows),
         "results": score_rows(rows)
     }
 
 
-# -------------------------
-# CSV SCANNER
-# -------------------------
-
 @app.post("/scan/csv")
 async def scan_csv(file: UploadFile = File(...)):
-
     if (
         not file.filename
         or not file.filename.lower().endswith(".csv")
@@ -306,32 +167,18 @@ async def scan_csv(file: UploadFile = File(...)):
 
     try:
         raw = (await file.read()).decode("utf-8-sig")
-
-        rows = list(
-            csv.DictReader(io.StringIO(raw))
-        )
+        rows = list(csv.DictReader(io.StringIO(raw)))
 
         if not rows:
             raise ValueError("CSV contains no data")
 
         numeric_fields = [
-            "close",
-            "ema34",
-            "ema50",
-            "ema200",
-            "vwap",
-            "prev_high",
-            "prev_low",
-            "volume",
-            "avg_volume20",
-            "rsi",
-            "adx"
+            "close", "ema34", "ema50", "ema200",
+            "vwap", "prev_high", "prev_low",
+            "volume", "avg_volume20", "rsi", "adx"
         ]
 
-        required_fields = [
-            "symbol",
-            *numeric_fields
-        ]
+        required_fields = ["symbol", *numeric_fields]
 
         for field in required_fields:
             if field not in rows[0]:
@@ -343,10 +190,9 @@ async def scan_csv(file: UploadFile = File(...)):
             for field in numeric_fields:
                 row[field] = float(row[field])
 
-            if not row.get("direction"):
-                row["direction"] = "BUY"
-
-            row["direction"] = row["direction"].upper()
+            row["direction"] = (
+                row.get("direction") or "BUY"
+            ).upper()
 
             if row["direction"] not in ("BUY", "SELL"):
                 raise ValueError(
@@ -357,6 +203,7 @@ async def scan_csv(file: UploadFile = File(...)):
 
         return {
             "mode": "CSV_IMPORTED_NOT_LIVE",
+            "broker": "Sahi",
             "timeframe": "5m",
             "total_stocks": len(results),
             "results": results
@@ -364,14 +211,9 @@ async def scan_csv(file: UploadFile = File(...)):
 
     except HTTPException:
         raise
-
     except Exception as exc:
         logger.exception("CSV processing failed")
-
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"CSV processing failed: "
-                f"{type(exc).__name__}: {str(exc)}"
-            )
+            detail=f"CSV processing failed: {str(exc)}"
         )
