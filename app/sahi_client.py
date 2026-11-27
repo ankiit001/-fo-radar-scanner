@@ -16,9 +16,7 @@ class SahiClient:
     def _get_client(self):
 
         if not self.key_id or not self.secret:
-            raise RuntimeError(
-                "SAHI_KEY_ID or SAHI_SECRET is missing"
-            )
+            raise RuntimeError("Sahi API credentials missing")
 
         if self._api is None:
             self._api = SahiAPI.from_credentials(
@@ -32,15 +30,14 @@ class SahiClient:
 
         try:
             api = self._get_client()
-            profile = api.get_profile()
+            api.get_profile()
 
             return {
                 "connected": True,
                 "authentication": "SUCCESS",
                 "broker": "Sahi",
-                "data_mode": "API_AUTHENTICATED",
-                "execution": "MANUAL_ONLY",
-                "profile": profile
+                "message": "API authentication successful",
+                "execution": "MANUAL_ONLY"
             }
 
         except Exception as exc:
@@ -49,7 +46,8 @@ class SahiClient:
             return {
                 "connected": False,
                 "authentication": "FAILED",
-                "broker": "Sahi",
                 "error_type": type(exc).__name__,
+                "message": "Check API credentials, approval and permissions",
                 "execution": "MANUAL_ONLY"
             }
+
