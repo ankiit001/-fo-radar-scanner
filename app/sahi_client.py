@@ -3,7 +3,6 @@ import os
 import logging
 from sahiapi import SahiAPI
 
-
 logger = logging.getLogger(__name__)
 
 
